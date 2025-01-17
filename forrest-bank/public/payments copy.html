@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payments</title>
+</head>
+
+<body>
+  <h1>Make a Payment</h1>
+  <p>Scan a QR Code to fill in payment details:</p>
+
+  <div id="camera-container">
+    <video id="camera" autoplay></video>
+    <canvas id="qr-canvas" style="display: none;"></canvas>
+  </div>
+
+  <button id="start-camera">Start Camera</button>
+  <p id="decoded-result"></p>
+
+  <div id="credential-container" style="display: none;">
+    <h2>Verifiable Credential Details</h2>
+    <p><strong>Issued by:</strong> <span id="issuer"></span></p>
+    <p><strong>Valid until:</strong> <span id="expiry"></span></p>
+    <p><strong>NZBN:</strong> <span id="nzbn"></span></p>
+    <p><strong>Bank Account:</strong> <span id="bank-account"></span></p>
+    <p><strong>Status:</strong> <span style="color: green;">✅ Credential Signature Verified</span></p>
+    <button id="toggle-raw">View Raw Credential</button>
+    <pre id="raw-credential" style="display: none;"></pre>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsqr"></script>
+  <script>
+    const startCameraBtn = document.getElementById('start-camera');
+    const video = document.getElementById('camera');
+    const canvas = document.getElementById('qr-canvas');
+    const resultElement = document.getElementById('decoded-result');
+    const ctx = canvas.getContext('2d');
+
+    startCameraBtn.addEventListener('click', async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        video.srcObject = stream;
+
+        video.addEventListener('play', () => {
+          const scan = () => {
+            const maxCanvasHeight = 400; // Adjust the maximum canvas height
+            const aspectRatio = video.videoWidth / video.videoHeight;
+
+            canvas.width = video.videoWidth; // Full width of the phone screen
+            canvas.height = Math.min(video.videoHeight, maxCanvasHeight); // Limit height
+            const scaleFactor = canvas.height / video.videoHeight;
+
+            ctx.drawImage(video, 0, 0, video.videoWidth * scaleFactor, canvas.height);
+
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsQR(imageData.data, canvas.width, canvas.height);
+
+            if (code) {
+              resultElement.textContent = `QR Code Detected: ${code.data}`;
+              // Automatically send to backend for processing
+              fetch('/make-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ qrCredential: code.data }),
+              })
+                .then((response) => response.json())
+                .then((data) => {
+                  if (data.payload) {
+                    // Call the displayCredentialDetails function with the payload
+                    displayCredentialDetails(data.payload);
+                  } else {
+                    resultElement.textContent = `Error: ${data.message}`;
+                  }
+                })
+                .catch((err) => {
+                  resultElement.textContent = `Error: ${err.message}`;
+                });
+
+              // Stop the scan
+              stream.getTracks().forEach((track) => track.stop());
+              video.srcObject = null;
+              return;
+            }
+
+            requestAnimationFrame(scan);
+          };
+
+          scan();
+        });
+      } catch (error) {
+        resultElement.textContent = 'Error accessing camera: ' + error.message;
+      }
+    });
+
+    function displayCredentialDetails(payload) {
+      document.getElementById("issuer").textContent = payload.issuer;
+      document.getElementById("expiry").textContent = new Date(payload.exp * 1000).toISOString();
+      document.getElementById("nzbn").textContent = payload.credentialSubject.nzbn;
+      document.getElementById("bank-account").textContent = payload.credentialSubject.bankAccountNumber;
+
+      const rawCredential = document.getElementById("raw-credential");
+      rawCredential.textContent = JSON.stringify(payload, null, 2);
+
+      const toggleRaw = document.getElementById("toggle-raw");
+      toggleRaw.addEventListener("click", () => {
+        rawCredential.style.display = rawCredential.style.display === "none" ? "block" : "none";
+      });
+
+      document.getElementById("credential-container").style.display = "block";
+    }
+  </script>
+
+</body>
+
+</html>

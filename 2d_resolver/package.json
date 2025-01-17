@@ -1,0 +1,17 @@
+{
+  "name": "2d_resolver",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.21.2",
+    "jose": "^5.9.6",
+    "jsonwebtoken": "^9.0.2"
+  }
+}

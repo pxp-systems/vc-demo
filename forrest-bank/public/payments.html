@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payments</title>
+</head>
+
+<body>
+  <h1>Make a Payment</h1>
+  <p>Scan a QR Code to fill in payment details:</p>
+
+  <div id="camera-container">
+    <video id="camera" autoplay></video>
+    <canvas id="qr-canvas" style="display: none;"></canvas>
+  </div>
+
+  <button id="start-camera">Scan QR Code for Payment</button>
+  <p id="decoded-result"></p>
+
+  <div id="credential-container" style="display: none;">
+    <h2>Verifiable Credential Details</h2>
+    <p><strong>Issued by:</strong> <span id="issuer"></span></p>
+    <p><strong>Issue date:</strong> <span id="issue-date"></span></p>
+    <p><strong>Valid until:</strong> <span id="expiry"></span></p>
+    <p><strong>NZBN:</strong> <span id="nzbn"></span></p>
+    <p><strong>Bank Account:</strong> <span id="bank-account"></span></p>
+    <p><strong>Status:</strong> <span id="status" style="color: green;">✅ Credential Signature Verified</span></p>
+    <button id="toggle-raw">View Raw Credential</button>
+    <pre id="raw-credential" style="display: none;"></pre>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsqr"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const startCameraBtn = document.getElementById('start-camera');
+      const video = document.getElementById('camera');
+      const canvas = document.getElementById('qr-canvas');
+      const resultElement = document.getElementById('decoded-result');
+      const ctx = canvas.getContext('2d');
+
+      startCameraBtn.addEventListener('click', async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+          video.srcObject = stream;
+
+          video.addEventListener('play', () => {
+            const scan = () => {
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const code = jsQR(imageData.data, canvas.width, canvas.height);
+
+              if (code) {
+                resultElement.textContent = `QR Code Detected: ${code.data}`;
+                fetch('/make-payment', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ qrCredential: code.data }),
+                })
+                  .then(response => response.json())
+                  .then(data => {
+                    if (data.payload) {
+                      displayCredentialDetails(data.payload);
+                    } else {
+                      resultElement.textContent = data.message || 'Payment failed';
+                    }
+                  })
+                  .catch(err => {
+                    resultElement.textContent = `Error: ${err.message}`;
+                  });
+
+                stream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+                return;
+              }
+
+              requestAnimationFrame(scan);
+            };
+
+            scan();
+          });
+        } catch (error) {
+          resultElement.textContent = 'Error accessing camera: ' + error.message;
+        }
+      });
+
+      function displayCredentialDetails(payload) {
+        const issuerElement = document.getElementById("issuer");
+        const issueDateElement = document.getElementById("issue-date");
+        const expiryElement = document.getElementById("expiry");
+        const nzbnElement = document.getElementById("nzbn");
+        const bankAccountElement = document.getElementById("bank-account");
+        const statusElement = document.getElementById("status");
+        const rawCredential = document.getElementById("raw-credential");
+        const credentialContainer = document.getElementById("credential-container");
+
+        if (issuerElement) issuerElement.textContent = payload.issuer || "Unknown Issuer";
+
+        // Validate and convert iat
+        if (issueDateElement) {
+          issueDateElement.textContent =
+            typeof payload.iat === "number" && !isNaN(payload.iat)
+              ? new Date(payload.iat * 1000).toISOString()
+              : "No Issue Date";
+        }
+
+        // Validate and convert exp
+        if (expiryElement) {
+          expiryElement.textContent =
+            typeof payload.exp === "number" && !isNaN(payload.exp)
+              ? new Date(payload.exp * 1000).toISOString()
+              : "No Expiry";
+        }
+
+        if (nzbnElement) nzbnElement.textContent = payload.credentialSubject?.nzbn || "Unknown NZBN";
+        if (bankAccountElement) bankAccountElement.textContent = payload.credentialSubject?.bankAccountNumber || "Unknown Bank Account";
+
+        // Set status
+        if (statusElement) {
+          const now = Math.floor(Date.now() / 1000);
+          if (payload.verificationError || (payload.exp && payload.exp < now)) {
+            statusElement.style.color = "red";
+            statusElement.textContent = "❌ Credential Expired or Invalid";
+          } else {
+            statusElement.style.color = "green";
+            statusElement.textContent = "✅ Credential Verified";
+          }
+        }
+
+        // Display raw credential
+        if (rawCredential) {
+          rawCredential.textContent = JSON.stringify(payload, null, 2);
+
+          const toggleRaw = document.getElementById("toggle-raw");
+          if (toggleRaw) {
+            toggleRaw.addEventListener("click", () => {
+              rawCredential.style.display = rawCredential.style.display === "none" ? "block" : "none";
+            });
+          }
+        }
+
+        // Show credential container
+        if (credentialContainer) {
+          credentialContainer.style.display = "block";
+        }
+      }
+
+
+    });
+  </script>
+</body>
+
+</html>
